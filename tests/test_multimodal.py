@@ -144,6 +144,8 @@ class TestAnthropicMultimodal:
             headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
         )
         assert resp.status_code == 200
+        text = resp.json()["content"][0]["text"]
+        assert "[image:image/png]" in text
 
     async def test_string_content_still_works(self, client):
         resp = await client.post(

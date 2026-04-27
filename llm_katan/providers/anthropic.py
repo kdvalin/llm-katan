@@ -72,8 +72,10 @@ def _extract_text_from_content(content: str | list) -> str:
     for block in content:
         if isinstance(block, dict) and block.get("type") == "text":
             parts.append(block.get("text", ""))
+        elif isinstance(block, dict) and block.get("type") == "image":
+            media_type = block.get("source", {}).get("media_type", "unknown")
+            parts.append(f"[image:{media_type}]")
         elif isinstance(block, dict) and block.get("type") == "tool_result":
-            # Extract text from tool results
             inner = block.get("content", "")
             if isinstance(inner, str):
                 parts.append(inner)
