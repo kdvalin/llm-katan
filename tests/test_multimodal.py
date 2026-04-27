@@ -272,7 +272,7 @@ class TestAzureMultimodal:
 # ── JSON mode ──
 
 
-class TestJSONMode:
+class TestJSONModeOpenAI:
     @pytest_asyncio.fixture
     async def client(self):
         app = make_app(["openai"])
@@ -305,3 +305,64 @@ class TestJSONMode:
         content = resp.json()["choices"][0]["message"]["content"]
         with __import__("pytest").raises(json.JSONDecodeError):
             json.loads(content)
+
+
+class TestJSONModeAnthropic:
+    @pytest_asyncio.fixture
+    async def client(self):
+        app = make_app(["anthropic"])
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+    async def test_json_object_response(self, client):
+        import json
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100,
+                "messages": [{"role": "user", "content": "give me json"}],
+                "response_format": {"type": "json_object"},
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        assert resp.status_code == 200
+        text = resp.json()["content"][0]["text"]
+        parsed = json.loads(text)
+        assert "response" in parsed
+
+    async def test_no_response_format_returns_plain_text(self, client):
+        import json
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        text = resp.json()["content"][0]["text"]
+        with __import__("pytest").raises(json.JSONDecodeError):
+            json.loads(text)
+
+
+class TestJSONModeAzure:
+    @pytest_asyncio.fixture
+    async def client(self):
+        app = make_app(["azure_openai"])
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+    async def test_json_object_response(self, client):
+        import json
+        resp = await client.post(
+            "/openai/deployments/gpt-4/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "give me json"}],
+                "response_format": {"type": "json_object"},
+            },
+            headers={"api-key": "test"},
+        )
+        assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+        assert "response" in parsed

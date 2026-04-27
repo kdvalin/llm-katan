@@ -42,6 +42,7 @@ class AnthropicMessagesRequest(BaseModel):
     metadata: dict | None = None
     tools: list[dict] | None = None
     tool_choice: str | dict | None = None
+    response_format: dict | None = None
 
 
 def _anthropic_error(status_code: int, message: str) -> JSONResponse:
@@ -188,6 +189,9 @@ class AnthropicProvider(Provider):
                     tool["name"], tool_input,
                     prompt_tokens, completion_tokens,
                 )
+
+            if request.response_format and request.response_format.get("type") == "json_object":
+                generated_text = json.dumps({"response": generated_text})
 
             if request.stream:
                 return StreamingResponse(
