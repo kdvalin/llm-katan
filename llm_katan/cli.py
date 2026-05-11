@@ -128,6 +128,16 @@ logger = logging.getLogger(__name__)
     default=0, type=int,
     help="After N requests, return 429 for all subsequent requests. Echo backend only. (default: 0 = disabled)",
 )
+@click.option(
+    "--max-inflight",
+    default=0, type=int,
+    help="Return 503 when concurrent requests exceed this limit. Echo backend only. (default: 0 = disabled)",
+)
+@click.option(
+    "--chunk-delay-ms",
+    default=0, type=int,
+    help="Delay in ms between SSE streaming chunks. Echo backend only. (default: 0)",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -152,6 +162,8 @@ def main(
     latency_ms: int,
     timeout_after: int,
     rate_limit_after: int,
+    max_inflight: int,
+    chunk_delay_ms: int,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -214,6 +226,8 @@ def main(
         latency_ms=latency_ms,
         timeout_after=timeout_after,
         rate_limit_after=rate_limit_after,
+        max_inflight=max_inflight,
+        chunk_delay_ms=chunk_delay_ms,
     )
 
     protocol = "https" if config.tls else "http"
@@ -232,7 +246,10 @@ def main(
             click.echo("  TLS:       enabled (self-signed)")
     if config.validate_keys:
         click.echo("  Keys:      validating (use --api-keys to override defaults)")
-    has_failures = config.error_rate > 0 or config.latency_ms > 0 or config.timeout_after > 0 or config.rate_limit_after > 0
+    has_failures = (
+        config.error_rate > 0 or config.latency_ms > 0 or config.timeout_after > 0
+        or config.rate_limit_after > 0 or config.max_inflight > 0 or config.chunk_delay_ms > 0
+    )
     if has_failures:
         parts = []
         if config.error_rate > 0:
@@ -243,6 +260,10 @@ def main(
             parts.append(f"timeout_after={config.timeout_after}")
         if config.rate_limit_after > 0:
             parts.append(f"rate_limit_after={config.rate_limit_after}")
+        if config.max_inflight > 0:
+            parts.append(f"max_inflight={config.max_inflight}")
+        if config.chunk_delay_ms > 0:
+            parts.append(f"chunk_delay={config.chunk_delay_ms}ms")
         click.echo(f"  Failures:  {', '.join(parts)}")
     click.echo(f"  Stats:     {config.stats_file}")
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")

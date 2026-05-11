@@ -318,3 +318,82 @@ class TestSharedCounter:
 
             r3 = await c.post("/v1/chat/completions", json=openai_body(), headers=openai_headers())
             assert r3.status_code == 504
+
+
+# --- Capacity-based overload (#19) ---
+
+
+class TestMaxInflight:
+    async def test_returns_503_when_capacity_exceeded(self):
+        import asyncio
+        app = make_app(max_inflight=1, latency_ms=500)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            tasks = [
+                c.post("/v1/chat/completions", json=openai_body(), headers=openai_headers())
+                for _ in range(3)
+            ]
+            results = await asyncio.gather(*tasks)
+            codes = sorted([r.status_code for r in results])
+            assert 503 in codes, f"Expected at least one 503, got {codes}"
+
+    async def test_within_capacity_all_succeed(self):
+        import asyncio
+        app = make_app(max_inflight=10)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            tasks = [
+                c.post("/v1/chat/completions", json=openai_body(), headers=openai_headers())
+                for _ in range(5)
+            ]
+            results = await asyncio.gather(*tasks)
+            assert all(r.status_code == 200 for r in results)
+
+    async def test_503_native_error_format(self):
+        import asyncio
+        app = make_app(["anthropic"], max_inflight=1, latency_ms=500)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            tasks = [
+                c.post("/v1/messages", json=anthropic_body(), headers=anthropic_headers())
+                for _ in range(3)
+            ]
+            results = await asyncio.gather(*tasks)
+            err_responses = [r for r in results if r.status_code == 503]
+            assert len(err_responses) > 0
+            assert err_responses[0].json()["error"]["type"] == "overloaded_error"
+
+
+# --- Per-chunk streaming latency (#18) ---
+
+
+class TestChunkDelay:
+    async def test_chunk_delay_adds_latency(self):
+        import time
+        app = make_app(chunk_delay_ms=100)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            resp = await c.post(
+                "/v1/chat/completions",
+                json={**openai_body(), "stream": True},
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert resp.status_code == 200
+            assert elapsed >= 0.3, f"Expected >= 300ms, got {elapsed*1000:.0f}ms"
+
+    async def test_no_chunk_delay_is_fast(self):
+        import time
+        app = make_app(chunk_delay_ms=0)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            resp = await c.post(
+                "/v1/chat/completions",
+                json={**openai_body(), "stream": True},
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert resp.status_code == 200
+            assert elapsed < 0.2

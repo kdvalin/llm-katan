@@ -4,6 +4,7 @@ OpenAI Chat Completions API provider for llm-katan.
 Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -131,8 +132,11 @@ class OpenAIProvider(Provider):
                     }
                     yield f"data: {json.dumps(role_chunk)}\n\n"
 
+                    chunk_delay = self.backend.config.chunk_delay_ms / 1000.0 if self.backend.config.chunk_delay_ms > 0 else 0
                     chunk_size = 4
                     for i in range(0, len(generated_text), chunk_size):
+                        if chunk_delay > 0:
+                            await asyncio.sleep(chunk_delay)
                         chunk_text = generated_text[i: i + chunk_size]
                         yield f"data: {json.dumps(self._stream_chunk(response_id, created, model_name, chunk_text))}\n\n"
 
@@ -157,7 +161,13 @@ class OpenAIProvider(Provider):
             return resp_body
 
         @app.get("/v1/models")
-        async def list_models():
+        async def list_models(raw_request: Request):
+            auth_err = self.check_auth(dict(raw_request.headers))
+            if auth_err:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": {"message": auth_err, "type": "invalid_request_error", "code": "invalid_api_key"}},
+                )
             return {"object": "list", "data": [self.backend.get_model_info()]}
 
     @staticmethod

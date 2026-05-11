@@ -82,7 +82,7 @@ async def test_root(client):
 
 @pytest.mark.asyncio
 async def test_list_models(client):
-    resp = await client.get("/v1/models")
+    resp = await client.get("/v1/models", headers=openai_headers())
     assert resp.status_code == 200
     data = resp.json()
     assert data["object"] == "list"

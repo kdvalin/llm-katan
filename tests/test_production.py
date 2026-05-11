@@ -510,3 +510,23 @@ class TestConfig:
     def test_served_model_name_override(self):
         config = ServerConfig(model_name="Qwen/Qwen3-0.6B", served_model_name="gpt-4o")
         assert config.served_model_name == "gpt-4o"
+
+    def test_env_var_model_updates_served_name(self, monkeypatch):
+        monkeypatch.setenv("LLM_KATAN_MODEL", "override-model")
+        config = ServerConfig(model_name="original-model")
+        assert config.model_name == "override-model"
+        assert config.served_model_name == "override-model"
+
+
+# ============================================================
+# 8. Auth on /v1/models
+# ============================================================
+
+class TestModelsAuth:
+    @pytest.mark.asyncio
+    async def test_models_without_auth_rejected(self):
+        app = make_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get("/v1/models")
+            assert resp.status_code == 401

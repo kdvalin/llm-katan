@@ -43,13 +43,15 @@ class ServerConfig:
     latency_ms: int = 0
     timeout_after: int = 0
     rate_limit_after: int = 0
+    max_inflight: int = 0
+    chunk_delay_ms: int = 0
 
     def __post_init__(self):
+        # Environment variable overrides (before served_model_name defaulting)
+        self.model_name = os.getenv("LLM_KATAN_MODEL", self.model_name)
+
         if self.served_model_name is None:
             self.served_model_name = self.model_name
-
-        # Environment variable overrides
-        self.model_name = os.getenv("LLM_KATAN_MODEL", self.model_name)
         self.port = int(os.getenv("LLM_KATAN_PORT", str(self.port)))
         self.backend = os.getenv("LLM_KATAN_BACKEND", self.backend)
         self.host = os.getenv("LLM_KATAN_HOST", self.host)

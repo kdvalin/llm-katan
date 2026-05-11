@@ -54,6 +54,7 @@ def _anthropic_error(status_code: int, message: str) -> JSONResponse:
         404: "not_found_error",
         429: "rate_limit_error",
         500: "api_error",
+        503: "overloaded_error",
         529: "overloaded_error",
     }
     error_type = error_types.get(status_code, "api_error")

@@ -253,6 +253,7 @@ class EchoBackend(ModelBackend):
 
         self._hostname = socket.gethostname()
         self._request_count = 0
+        self._inflight = 0
 
     async def load_model(self) -> None:
         logger.info("Echo backend ready (no model loaded)")
@@ -264,6 +265,25 @@ class EchoBackend(ModelBackend):
             logger.info("Failure simulation: timeout after %d requests", self.config.timeout_after)
         if self.config.rate_limit_after > 0:
             logger.info("Failure simulation: rate limit after %d requests", self.config.rate_limit_after)
+        if self.config.max_inflight > 0:
+            logger.info("Failure simulation: max_inflight=%d", self.config.max_inflight)
+        if self.config.chunk_delay_ms > 0:
+            logger.info("Failure simulation: chunk_delay=%dms", self.config.chunk_delay_ms)
+
+    async def generate_text(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple[str, int, int]:
+        if self.config.max_inflight > 0 and self._inflight >= self.config.max_inflight:
+            raise SimulatedError(503, "service overloaded")
+        self._inflight += 1
+        try:
+            async with self._semaphore:
+                return await self._generate_text(messages, max_tokens, temperature)
+        finally:
+            self._inflight -= 1
 
     async def _generate_text(
         self,
