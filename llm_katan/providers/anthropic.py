@@ -176,11 +176,24 @@ class AnthropicProvider(Provider):
                 return _anthropic_error(e.status_code, e.message)
 
             msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-            model_name = self.backend.config.served_model_name
+            model_name = request.model
 
             if request.tools:
                 tool = request.tools[0]
                 tool_input = generate_dummy_args(tool.get("input_schema"))
+
+                if request.stream:
+                    return StreamingResponse(
+                        self._stream_tool_response(
+                            msg_id, model_name, generated_text,
+                            tool["name"], tool_input,
+                            prompt_tokens, completion_tokens,
+                            metrics, start_time, client_ip,
+                        ),
+                        media_type="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                    )
+
                 elapsed = time.time() - start_time
                 metrics.record(elapsed, prompt_tokens, completion_tokens)
                 logger.info(
@@ -254,6 +267,83 @@ class AnthropicProvider(Provider):
                 "output_tokens": output_tokens,
             },
         }
+
+    @staticmethod
+    async def _stream_tool_response(
+        msg_id, model, text, tool_name, tool_input,
+        input_tokens, output_tokens, metrics, start_time, client_ip="unknown",
+    ):
+        tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
+        chunk_size = 4
+
+        def _sse(event, data):
+            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+        # message_start
+        msg_start = {
+            'type': 'message_start',
+            'message': {
+                'id': msg_id, 'type': 'message', 'role': 'assistant',
+                'content': [], 'model': model,
+                'stop_reason': None, 'stop_sequence': None,
+                'usage': {'input_tokens': input_tokens, 'output_tokens': 0},
+            },
+        }
+        yield _sse('message_start', msg_start)
+
+        # text content block (index 0)
+        yield _sse('content_block_start', {
+            'type': 'content_block_start', 'index': 0,
+            'content_block': {'type': 'text', 'text': ''},
+        })
+        for i in range(0, len(text), chunk_size):
+            yield _sse('content_block_delta', {
+                'type': 'content_block_delta', 'index': 0,
+                'delta': {'type': 'text_delta', 'text': text[i:i + chunk_size]},
+            })
+        yield _sse('content_block_stop', {
+            'type': 'content_block_stop', 'index': 0,
+        })
+
+        # tool_use content block (index 1)
+        yield _sse('content_block_start', {
+            'type': 'content_block_start', 'index': 1,
+            'content_block': {
+                'type': 'tool_use', 'id': tool_id,
+                'name': tool_name, 'input': {},
+            },
+        })
+        input_json = json.dumps(tool_input)
+        yield _sse('content_block_delta', {
+            'type': 'content_block_delta', 'index': 1,
+            'delta': {'type': 'input_json_delta', 'partial_json': ''},
+        })
+        for i in range(0, len(input_json), chunk_size):
+            yield _sse('content_block_delta', {
+                'type': 'content_block_delta', 'index': 1,
+                'delta': {
+                    'type': 'input_json_delta',
+                    'partial_json': input_json[i:i + chunk_size],
+                },
+            })
+        yield _sse('content_block_stop', {
+            'type': 'content_block_stop', 'index': 1,
+        })
+
+        # message_delta + message_stop
+        yield _sse('message_delta', {
+            'type': 'message_delta',
+            'delta': {'stop_reason': 'tool_use', 'stop_sequence': None},
+            'usage': {'output_tokens': output_tokens},
+        })
+        yield _sse('message_stop', {'type': 'message_stop'})
+
+        elapsed = time.time() - start_time
+        metrics.record(elapsed, input_tokens, output_tokens)
+        logger.info(
+            "anthropic | %s | 200 | stream tool_use | %d tokens | %.3fs",
+            client_ip, input_tokens + output_tokens, elapsed,
+        )
 
     @staticmethod
     async def _stream_response(msg_id, model, text, input_tokens, output_tokens, metrics, start_time, client_ip="unknown"):

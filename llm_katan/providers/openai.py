@@ -103,7 +103,7 @@ class OpenAIProvider(Provider):
 
             response_id = f"chatcmpl-{int(time.time() * 1000)}"
             created = int(time.time())
-            model_name = self.backend.config.served_model_name
+            model_name = request.model
             use_json = request.response_format and request.response_format.get("type") == "json_object"
 
             if request.tools:

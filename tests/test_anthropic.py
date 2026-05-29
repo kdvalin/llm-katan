@@ -219,8 +219,12 @@ class TestResponseFormat:
 
     @pytest.mark.asyncio
     async def test_model_echoed_back(self, client):
-        resp = await client.post("/v1/messages", json=base_request(), headers=anthropic_headers())
-        assert resp.json()["model"] == "claude-test"
+        resp = await client.post(
+            "/v1/messages",
+            json=base_request(model="claude-sonnet-4-6-20250514"),
+            headers=anthropic_headers(),
+        )
+        assert resp.json()["model"] == "claude-sonnet-4-6-20250514"
 
 
 # ============================================================
