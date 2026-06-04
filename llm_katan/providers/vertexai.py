@@ -205,7 +205,7 @@ class VertexAIProvider(Provider):
 
         # Tool calling: if tools are present, return a functionCall response
         tools = body.get("tools")
-        if tools and not self.backend.config.no_auto_tool:
+        if tools and self.name not in self.backend.config.no_auto_tool_providers:
             func_decl = None
             for tool_obj in tools:
                 decls = tool_obj.get("functionDeclarations", [])

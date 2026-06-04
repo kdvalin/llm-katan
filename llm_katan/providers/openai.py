@@ -106,7 +106,7 @@ class OpenAIProvider(Provider):
             model_name = request.model
             use_json = request.response_format and request.response_format.get("type") == "json_object"
 
-            if request.tools and not self.backend.config.no_auto_tool:
+            if request.tools and self.name not in self.backend.config.no_auto_tool_providers:
                 tool = request.tools[0]["function"]
                 tool_call = {
                     "id": generate_tool_call_id(),

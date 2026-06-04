@@ -178,7 +178,7 @@ class AnthropicProvider(Provider):
             msg_id = f"msg_{uuid.uuid4().hex[:24]}"
             model_name = request.model
 
-            if request.tools and not self.backend.config.no_auto_tool:
+            if request.tools and self.name not in self.backend.config.no_auto_tool_providers:
                 tool = request.tools[0]
                 tool_input = generate_dummy_args(tool.get("input_schema"))
 

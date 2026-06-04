@@ -248,7 +248,7 @@ class BedrockProvider(Provider):
 
         # Tool calling: if toolConfig is present, return a toolUse response
         tool_config = body.get("toolConfig")
-        if tool_config and not self.backend.config.no_auto_tool:
+        if tool_config and self.name not in self.backend.config.no_auto_tool_providers:
             tools = tool_config.get("tools", [])
             if tools:
                 tool_spec = tools[0].get("toolSpec", {})

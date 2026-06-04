@@ -47,7 +47,7 @@ class ServerConfig:
     chunk_delay_ms: int = 0
     ttft_ms: int = 0
     itl_ms: int = 0
-    no_auto_tool: bool = False
+    no_auto_tool_providers: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         # Environment variable overrides (before served_model_name defaulting)

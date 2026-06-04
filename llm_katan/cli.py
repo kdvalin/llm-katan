@@ -19,7 +19,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.18.0"
+    __version__ = "0.19.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -149,10 +149,9 @@ logger = logging.getLogger(__name__)
     help="Inter-Token Latency in ms. Delays between streaming chunks. Echo backend only. (default: 0)",
 )
 @click.option(
-    "--no-auto-tool",
-    is_flag=True,
-    default=False,
-    help="Never auto-generate tool_use responses. Accept tools in requests but always return text.",
+    "--no-auto-tool-providers",
+    default="",
+    help="Comma-separated providers that skip auto tool_use responses (e.g., 'anthropic').",
 )
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
@@ -182,7 +181,7 @@ def main(
     chunk_delay_ms: int,
     ttft_ms: int,
     itl_ms: int,
-    no_auto_tool: bool,
+    no_auto_tool_providers: str,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -249,7 +248,7 @@ def main(
         chunk_delay_ms=chunk_delay_ms,
         ttft_ms=ttft_ms,
         itl_ms=itl_ms,
-        no_auto_tool=no_auto_tool,
+        no_auto_tool_providers=[p.strip() for p in no_auto_tool_providers.split(",") if p.strip()],
     )
 
     protocol = "https" if config.tls else "http"

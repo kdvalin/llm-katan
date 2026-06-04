@@ -388,10 +388,10 @@ class TestAnthropicStreamingToolCalling:
         assert msg_start["message"]["model"] == "claude-sonnet-4-6-20250514"
 
 
-class TestNoAutoTool:
+class TestNoAutoToolProviders:
     @pytest_asyncio.fixture
     async def client(self):
-        app = make_app(["anthropic", "openai"], no_auto_tool=True)
+        app = make_app(["anthropic", "openai"], no_auto_tool_providers=["anthropic"])
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             yield c
 
@@ -422,7 +422,7 @@ class TestNoAutoTool:
         )
         assert "text/event-stream" in resp.headers["content-type"]
 
-    async def test_openai_tools_ignored_returns_text(self, client):
+    async def test_openai_still_returns_tool_calls(self, client):
         resp = await client.post(
             "/v1/chat/completions",
             json={
@@ -434,8 +434,8 @@ class TestNoAutoTool:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["choices"][0]["finish_reason"] == "stop"
-        assert data["choices"][0]["message"]["content"] is not None
+        assert data["choices"][0]["finish_reason"] == "tool_calls"
+        assert data["choices"][0]["message"]["tool_calls"] is not None
 
 
 # ── Vertex AI ──
