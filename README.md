@@ -11,13 +11,15 @@ Katan means "small" in Hebrew.
 - **Echo Mode** — instant startup, no model download, no GPU, no torch dependency
 - **Auth Validation** — each provider requires its native auth header
 - **Streaming** — all providers support SSE streaming in their native format
-- **Live Dashboard** — real-time WebSocket-powered view of every request/response at `/dashboard`
+- **Live Dashboard** — real-time WebSocket-powered view of every request/response at `/dashboard`, with estimated cost savings
+- **Cost Savings Tracker** — per-provider token tracking with estimated API cost savings, editable pricing via REST API
 - **Prometheus Metrics** — request counts, token usage, latency at `/metrics`
-- **Tool Calling** — all providers accept tool definitions and return tool call responses in native format
+- **Tool Calling** — all providers accept tool definitions and return tool call responses in native format (including Anthropic streaming tool_use)
 - **Multimodal** — image content blocks accepted across all providers (OpenAI image_url, Anthropic image, Vertex inlineData, Bedrock image)
 - **JSON Mode** — `response_format: {type: "json_object"}` returns valid JSON
 - **Failure Simulation** — inject errors, latency, timeouts, and rate limits for gateway resilience testing
-- **313+ Tests** — extensive coverage for every provider, format, and edge case
+- **Inference Benchmarking** — configurable TTFT, inter-token latency, and chunk delay for streaming performance testing
+- **363+ Tests** — extensive coverage for every provider, format, and edge case
 
 ## Quick Start
 
@@ -90,7 +92,10 @@ No translation chain, no SDK calls, no cloud API costs.
 - `GET /` — server info
 - `GET /health` — health check
 - `GET /metrics` — Prometheus metrics
-- `GET /dashboard` — live request/response dashboard
+- `GET /stats` — lifetime request counts, token usage, and estimated cost savings
+- `GET /pricing` — current per-provider pricing table
+- `PUT /pricing` — update pricing (JSON body, merged into current)
+- `GET /dashboard` — live request/response dashboard with cost savings
 - `GET /docs` — Swagger UI
 
 ## Example Requests
@@ -152,6 +157,7 @@ Optional:
   --validate-keys               Enforce API key validation
   --api-keys TEXT               Override keys: openai=mykey,anthropic=mykey2
   --stats-file PATH             Persistent stats file (default: ~/.llm-katan/stats.json)
+  --no-auto-tool-providers TEXT  Comma-separated providers that skip auto tool responses
   --log-level [debug|info|warning|error]  Log level (default: INFO)
 
 Failure Simulation (echo backend only):
@@ -159,6 +165,10 @@ Failure Simulation (echo backend only):
   --latency-ms INTEGER          Artificial delay per response in ms (default: 0)
   --timeout-after INTEGER       Return 504 after N successful requests (default: 0 = disabled)
   --rate-limit-after INTEGER    Return 429 after N requests (default: 0 = disabled)
+  --max-inflight INTEGER        Return 503 when concurrent requests exceed limit (default: 0 = disabled)
+  --chunk-delay-ms INTEGER      Delay between SSE streaming chunks in ms (default: 0)
+  --ttft-ms INTEGER             Time to First Token delay in ms (default: 0)
+  --itl-ms INTEGER              Inter-Token Latency between chunks in ms (default: 0)
 ```
 
 ## Tool Calling
@@ -248,11 +258,55 @@ llm-katan -m test --backend echo --rate-limit-after 50 --providers openai
 
 # Combine: slow + flaky
 llm-katan -m test --backend echo --latency-ms 500 --error-rate 0.1 --providers openai
+
+# Simulate realistic streaming latency (200ms TTFT, 30ms between tokens)
+llm-katan -m test --backend echo --ttft-ms 200 --itl-ms 30 --providers openai
+
+# Reject when more than 10 requests are in-flight (capacity overload)
+llm-katan -m test --backend echo --max-inflight 10 --providers openai
 ```
 
 Errors are returned in each provider's native error format — an OpenAI 429 looks different from a Bedrock 429 or an Anthropic 429, just like the real providers. The request counter for `--timeout-after` and `--rate-limit-after` is shared across all providers on the same instance.
 
 **Example use case:** Run two llm-katan instances — one healthy, one with `--error-rate 0.3`. Point your AI gateway at both and verify it detects the degraded instance and shifts traffic to the healthy one.
+
+## Cost Savings
+
+The dashboard and `/stats` endpoint track estimated API cost savings — how much you would have spent if these requests hit real providers. Token counts are tracked per provider and multiplied by configurable pricing.
+
+```bash
+# View current stats with savings
+curl -s http://localhost:8000/stats | python3 -m json.tool
+
+# View pricing table
+curl -s http://localhost:8000/pricing | python3 -m json.tool
+
+# Update pricing (e.g., after a provider price change)
+curl -X PUT http://localhost:8000/pricing \
+  -H "Content-Type: application/json" \
+  -d '{"anthropic": {"input": 3.00, "output": 15.00}}'
+```
+
+Default pricing (per 1M tokens):
+
+| Provider | Input | Output | Based on |
+|----------|-------|--------|----------|
+| OpenAI | $2.50 | $10.00 | GPT-4o |
+| Anthropic | $3.00 | $15.00 | Claude Sonnet |
+| Vertex AI | $1.25 | $5.00 | Gemini 1.5 Pro |
+| Bedrock | $3.00 | $15.00 | Claude via Bedrock |
+| Azure OpenAI | $2.50 | $10.00 | GPT-4o via Azure |
+
+Pricing overrides persist to the stats file and survive restarts.
+
+## Selective Tool Responses
+
+By default, any request with tools gets a tool call response. Use `--no-auto-tool-providers` to disable this per provider — useful when pointing AI agent clients (like Claude Code) at the simulator:
+
+```bash
+# Anthropic returns text even with tools, other providers return tool_calls normally
+llm-katan -m test --backend echo --providers openai,anthropic --no-auto-tool-providers anthropic
+```
 
 ## Development
 
