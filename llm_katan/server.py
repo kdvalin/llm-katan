@@ -13,7 +13,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -28,7 +28,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.19.0"
+    __version__ = "0.20.0"
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,21 @@ class ServerMetrics:
         if not self.response_times:
             return 0.0
         return sum(self.response_times) / len(self.response_times)
+
+
+def _extract_tokens(resp_body) -> tuple[int, int]:
+    """Extract token counts from a parsed response body, any provider format."""
+    if not isinstance(resp_body, dict):
+        return 0, 0
+    usage = resp_body.get("usage", {})
+    if usage:
+        prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or usage.get("inputTokens", 0)
+        completion = usage.get("completion_tokens") or usage.get("output_tokens") or usage.get("outputTokens", 0)
+        return int(prompt), int(completion)
+    meta = resp_body.get("usageMetadata", {})
+    if meta:
+        return int(meta.get("promptTokenCount", 0)), int(meta.get("candidatesTokenCount", 0))
+    return 0, 0
 
 
 # Provider detection from URL path
@@ -167,6 +182,9 @@ class DashboardMiddleware(BaseHTTPMiddleware):
         stats = getattr(request.app.state, "stats", None)
         if stats:
             stats.record(provider)
+            prompt_t, completion_t = _extract_tokens(resp_body)
+            if prompt_t or completion_t:
+                stats.record_tokens(provider, prompt_t, completion_t)
 
         return new_response
 
@@ -270,6 +288,18 @@ def create_app(config: ServerConfig) -> FastAPI:
     async def get_stats():
         stats: PersistentStats = app.state.stats
         return stats.get()
+
+    @app.get("/pricing")
+    async def get_pricing():
+        stats: PersistentStats = app.state.stats
+        return stats.pricing
+
+    @app.put("/pricing")
+    async def update_pricing(request: Request):
+        body = await request.json()
+        stats: PersistentStats = app.state.stats
+        stats.pricing = body
+        return stats.pricing
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard():

@@ -176,6 +176,21 @@
     font-size: 12px;
   }
 
+  .stats-bar .stats-savings {
+    color: var(--accent-green);
+    font-size: 18px;
+    font-weight: 700;
+    margin-left: 8px;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+  }
+
+  .stats-bar .stats-savings-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 400;
+  }
+
   .stats-bar .stats-providers {
     display: flex;
     gap: 16px;
@@ -413,6 +428,7 @@
 <div class="stats-bar" id="statsBar">
   <span class="stats-label">Lifetime</span>
   <span><span class="stats-total" id="statsTotal">—</span><span class="stats-total-label">requests</span></span>
+  <span><span class="stats-savings" id="statsSavings"></span><span class="stats-savings-label"> est. saved</span></span>
   <div class="stats-providers" id="statsProviders"></div>
 </div>
 
@@ -590,21 +606,42 @@ function providerClass(name) {
   return name.replace(/[^a-z_]/g, '');
 }
 
+function formatDollars(amount) {
+  if (amount >= 1000) return '$' + Math.round(amount).toLocaleString();
+  if (amount >= 1) return '$' + amount.toFixed(2);
+  if (amount > 0) return '$' + amount.toFixed(4);
+  return '$0';
+}
+
 async function fetchStats() {
   try {
     const resp = await fetch('/stats');
     const data = await resp.json();
     document.getElementById('statsTotal').textContent = data.total.toLocaleString();
+
+    const savings = data.estimated_savings || 0;
+    const el = document.getElementById('statsSavings');
+    el.textContent = formatDollars(savings);
+    el.parentElement.style.display = savings > 0 ? '' : 'none';
+
     const container = document.getElementById('statsProviders');
     container.innerHTML = '';
     for (const [name, count] of Object.entries(data.providers)) {
       const cls = providerClass(name);
       const label = PROVIDER_NAMES[cls] || name;
+      const tokens = data.tokens?.[name];
+      const pricing = data.pricing?.[name];
+      let provSavings = '';
+      if (tokens && pricing) {
+        const cost = (tokens.prompt / 1e6) * pricing.input
+                   + (tokens.completion / 1e6) * pricing.output;
+        if (cost > 0) provSavings = ` (${formatDollars(cost)})`;
+      }
       container.innerHTML += `
         <div class="stats-provider">
           <div class="stats-provider-dot ${cls}"></div>
           <span class="stats-provider-count">${count.toLocaleString()}</span>
-          <span class="stats-provider-name">${label}</span>
+          <span class="stats-provider-name">${label}${provSavings}</span>
         </div>`;
     }
   } catch(e) {}

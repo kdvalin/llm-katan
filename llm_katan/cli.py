@@ -19,7 +19,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.19.0"
+    __version__ = "0.20.0"
 
 logging.basicConfig(
     level=logging.INFO,

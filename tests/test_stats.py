@@ -41,7 +41,43 @@ class TestPersistentStatsInMemory:
         stats = PersistentStats()
         stats.record("openai")
         data = stats.get()
-        assert data == {"total": 1, "providers": {"openai": 1}}
+        assert data["total"] == 1
+        assert data["providers"] == {"openai": 1}
+
+    def test_record_tokens(self):
+        stats = PersistentStats()
+        stats.record_tokens("openai", 100, 50)
+        stats.record_tokens("openai", 200, 100)
+        stats.record_tokens("anthropic", 300, 150)
+        data = stats.get()
+        assert data["tokens"]["openai"] == {"prompt": 300, "completion": 150}
+        assert data["tokens"]["anthropic"] == {"prompt": 300, "completion": 150}
+
+    def test_estimated_savings(self):
+        stats = PersistentStats()
+        stats.record_tokens("openai", 1_000_000, 1_000_000)
+        savings = stats.estimated_savings()
+        assert savings == 2.50 + 10.00
+
+    def test_estimated_savings_multi_provider(self):
+        stats = PersistentStats()
+        stats.record_tokens("openai", 1_000_000, 0)
+        stats.record_tokens("anthropic", 0, 1_000_000)
+        savings = stats.estimated_savings()
+        assert savings == 2.50 + 15.00
+
+    def test_pricing_defaults(self):
+        stats = PersistentStats()
+        pricing = stats.pricing
+        assert "openai" in pricing
+        assert "anthropic" in pricing
+        assert pricing["openai"]["input"] == 2.50
+
+    def test_pricing_override(self):
+        stats = PersistentStats()
+        stats.pricing = {"openai": {"input": 5.00, "output": 20.00}}
+        assert stats.pricing["openai"]["input"] == 5.00
+        assert stats.pricing["anthropic"]["input"] == 3.00
 
 
 class TestPersistentStatsWithFile:
@@ -175,3 +211,56 @@ class TestStatsEndpoint:
 
         resp = await client.get("/stats")
         assert resp.json()["total"] == 0
+
+    async def test_stats_include_tokens(self, stats_client):
+        client, _ = stats_client
+        await client.post("/v1/chat/completions", json=chat_body(), headers=openai_headers())
+
+        resp = await client.get("/stats")
+        data = resp.json()
+        assert "tokens" in data
+        assert "openai" in data["tokens"]
+        assert data["tokens"]["openai"]["prompt"] > 0
+        assert data["tokens"]["openai"]["completion"] > 0
+
+    async def test_stats_include_estimated_savings(self, stats_client):
+        client, _ = stats_client
+        await client.post("/v1/chat/completions", json=chat_body(), headers=openai_headers())
+
+        resp = await client.get("/stats")
+        data = resp.json()
+        assert "estimated_savings" in data
+        assert data["estimated_savings"] >= 0
+
+    async def test_stats_include_pricing(self, stats_client):
+        client, _ = stats_client
+        resp = await client.get("/stats")
+        data = resp.json()
+        assert "pricing" in data
+        assert "openai" in data["pricing"]
+
+    async def test_pricing_get(self, stats_client):
+        client, _ = stats_client
+        resp = await client.get("/pricing")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "openai" in data
+        assert "input" in data["openai"]
+
+    async def test_pricing_put(self, stats_client):
+        client, _ = stats_client
+        resp = await client.put(
+            "/pricing",
+            json={"openai": {"input": 5.00, "output": 20.00}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["openai"]["input"] == 5.00
+        assert resp.json()["anthropic"]["input"] == 3.00
+
+    async def test_tokens_persisted_to_file(self, stats_client):
+        client, stats_file = stats_client
+        await client.post("/v1/chat/completions", json=chat_body(), headers=openai_headers())
+
+        file_data = json.loads(open(stats_file).read())
+        assert "tokens" in file_data
+        assert file_data["tokens"]["openai"]["prompt"] > 0
