@@ -622,7 +622,6 @@ async function fetchStats() {
     const savings = data.estimated_savings || 0;
     const el = document.getElementById('statsSavings');
     el.textContent = formatDollars(savings);
-    el.parentElement.style.display = savings > 0 ? '' : 'none';
 
     const container = document.getElementById('statsProviders');
     container.innerHTML = '';
