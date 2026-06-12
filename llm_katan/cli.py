@@ -55,6 +55,12 @@ logger = logging.getLogger(__name__)
     help="Device (default: auto)",
 )
 @click.option(
+    "--disable-dashboard",
+    is_flag=True,
+    default=False,
+    help="Disable dashboard middleware, useful to increase performance"
+)
+@click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
     default="INFO",
@@ -182,6 +188,7 @@ def main(
     ttft_ms: int,
     itl_ms: int,
     workers: int,
+    disable_dashboard: bool
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -248,7 +255,8 @@ def main(
         chunk_delay_ms=chunk_delay_ms,
         ttft_ms=ttft_ms,
         itl_ms=itl_ms,
-        workers=workers
+        workers=workers,
+        enable_dashboard=not disable_dashboard
     )
 
     protocol = "https" if config.tls else "http"

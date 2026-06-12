@@ -48,6 +48,7 @@ class ServerConfig:
     chunk_delay_ms: int = 0
     ttft_ms: int = 0
     itl_ms: int = 0
+    enable_dashboard: bool = True
 
     def __post_init__(self):
         # Environment variable overrides (before served_model_name defaulting)

@@ -215,7 +215,8 @@ def create_app(config: ServerConfig) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.config = config
-    app.add_middleware(DashboardMiddleware)
+    if config.enable_dashboard:
+        app.add_middleware(DashboardMiddleware)
 
     @app.get("/health")
     async def health():
