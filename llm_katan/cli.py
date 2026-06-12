@@ -148,6 +148,11 @@ logger = logging.getLogger(__name__)
     default=0, type=int,
     help="Inter-Token Latency in ms. Delays between streaming chunks. Echo backend only. (default: 0)",
 )
+@click.option(
+    "--workers",
+    default=1, type=int,
+    help="Number of workers to spin up"
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -176,6 +181,7 @@ def main(
     chunk_delay_ms: int,
     ttft_ms: int,
     itl_ms: int,
+    workers: int,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -242,6 +248,7 @@ def main(
         chunk_delay_ms=chunk_delay_ms,
         ttft_ms=ttft_ms,
         itl_ms=itl_ms,
+        workers=workers
     )
 
     protocol = "https" if config.tls else "http"
@@ -250,6 +257,7 @@ def main(
     click.echo(f"  Served:    {config.served_model_name}")
     click.echo(f"  Backend:   {config.backend}")
     click.echo(f"  Device:    {config.device_auto}")
+    click.echo(f"  Workers:   {config.workers}")
     if config.device_auto == "cpu":
         click.echo(f"  Quantize:  {'enabled' if config.quantize else 'disabled'}")
     click.echo(f"  Providers: {', '.join(config.providers)}")
@@ -304,7 +312,12 @@ def main(
             sys.exit(1)
 
     try:
-        asyncio.run(run_server(config))
+        if config.workers > 1:
+            # Import here to avoid circular imports
+            from .server import run_server_multiprocessing
+            run_server_multiprocessing(config)
+        else:
+            asyncio.run(run_server(config))
     except KeyboardInterrupt:
         click.echo("\nServer stopped")
     except Exception as e:

@@ -42,6 +42,7 @@ class ServerConfig:
     error_rate: float = 0.0
     latency_ms: int = 0
     timeout_after: int = 0
+    workers: int = 1
     rate_limit_after: int = 0
     max_inflight: int = 0
     chunk_delay_ms: int = 0

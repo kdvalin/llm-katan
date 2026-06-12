@@ -299,6 +299,28 @@ def create_app(config: ServerConfig) -> FastAPI:
     return app
 
 
+# Global config for multiprocessing workers
+_worker_config: ServerConfig | None = None
+
+
+def create_worker_app():
+    """Factory function for uvicorn workers."""
+    global _worker_config
+    if _worker_config is None:
+        # Worker processes need to recreate config from environment variables
+        import os
+        import json
+
+        config_json = os.getenv("LLM_KATAN_WORKER_CONFIG")
+        if not config_json:
+            raise RuntimeError("Worker config not found in environment")
+
+        config_dict = json.loads(config_json)
+        _worker_config = ServerConfig(**config_dict)
+
+    return create_app(_worker_config)
+
+
 def _generate_self_signed_cert():
     """Generate a self-signed TLS cert and key, return (certfile, keyfile) paths."""
     import datetime
@@ -349,11 +371,12 @@ def _generate_self_signed_cert():
     return certfile.name, keyfile.name
 
 
-async def run_server(config: ServerConfig):
-    """Run the server with uvicorn."""
+def run_server_multiprocessing(config: ServerConfig):
+    """Run the server with uvicorn multiprocessing workers."""
     import uvicorn
-
-    app = create_app(config)
+    import os
+    import json
+    from dataclasses import asdict
 
     ssl_kwargs = {}
     if config.tls:
@@ -367,7 +390,41 @@ async def run_server(config: ServerConfig):
 
     protocol = "https" if config.tls else "http"
     logger.info("Server URL: %s://%s:%d", protocol, config.host, config.port)
+    logger.info("Starting %d worker processes", config.workers)
 
+    # Pass config to worker processes via environment variable
+    os.environ["LLM_KATAN_WORKER_CONFIG"] = json.dumps(asdict(config))
+
+    # Use uvicorn.run() for multiprocessing
+    uvicorn.run(
+        "llm_katan.server:create_worker_app",
+        workers=config.workers,
+        host=config.host,
+        port=config.port,
+        log_level="info",
+        **ssl_kwargs
+    )
+
+
+async def run_server(config: ServerConfig):
+    """Run the server with uvicorn (single worker)."""
+    import uvicorn
+
+    ssl_kwargs = {}
+    if config.tls:
+        if config.tls_cert and config.tls_key:
+            ssl_kwargs = {"ssl_certfile": config.tls_cert, "ssl_keyfile": config.tls_key}
+            logger.info("TLS enabled (cert: %s)", config.tls_cert)
+        else:
+            certfile, keyfile = _generate_self_signed_cert()
+            ssl_kwargs = {"ssl_certfile": certfile, "ssl_keyfile": keyfile}
+            logger.info("TLS enabled (self-signed certificate)")
+
+    protocol = "https" if config.tls else "http"
+    logger.info("Server URL: %s://%s:%d", protocol, config.host, config.port)
+    logger.info("Starting single worker process")
+
+    app = create_app(config)
     server = uvicorn.Server(
         uvicorn.Config(app, host=config.host, port=config.port, log_level="info", **ssl_kwargs)
     )
