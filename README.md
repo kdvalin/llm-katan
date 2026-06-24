@@ -308,6 +308,23 @@ By default, any request with tools gets a tool call response. Use `--no-auto-too
 llm-katan -m test --backend echo --providers openai,anthropic --no-auto-tool-providers anthropic
 ```
 
+The flag takes a comma-separated list of provider names. A listed provider still **accepts** tools in the request, but always responds with plain text instead of a tool call:
+
+| Provider | In the list | Not in the list (default) |
+|----------|-------------|---------------------------|
+| Anthropic | text response, `stop_reason: end_turn` | tool_use block, `stop_reason: tool_use` |
+| OpenAI | text response, `finish_reason: stop` | `tool_calls`, `finish_reason: tool_calls` |
+
+**Why this exists:** AI agent clients run a tool-execution loop — they call a tool, feed the result back, and call again. Against the echo backend, every turn returns a tool call (the backend has no real model to decide otherwise), so the client loops forever on dummy tool calls. Listing the provider the client uses breaks the loop by returning text. Claude Code talks to the Anthropic provider, which is why the deployed dev instance runs `--no-auto-tool-providers anthropic`.
+
+**Scope and impact — know before you set it:**
+
+- **It's instance-wide.** Every request to a listed provider skips tools, for all clients. There's no per-request or per-client override — if you need both behaviors at once, run a second instance without the flag.
+- **The behavior change is silent.** A client expecting a tool call from a listed provider just gets text — no error, no warning. If a tool-calling test suddenly sees plain text, check this flag first.
+- **It disables tools for the *whole* provider, not specific tools.** You can't allow some tool calls and block others on the same provider.
+
+So the common split is: list the provider your agent client uses (e.g. `anthropic` for Claude Code), and leave the providers your tool-calling tests hit (e.g. `openai` for gateway E2E tests) off the list.
+
 ## Development
 
 ```bash
