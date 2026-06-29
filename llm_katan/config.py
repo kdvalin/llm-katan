@@ -48,6 +48,7 @@ class ServerConfig:
     chunk_delay_ms: int = 0
     ttft_ms: int = 0
     itl_ms: int = 0
+    no_auto_tool_providers: list[str] = field(default_factory=list)
     enable_dashboard: bool = True
 
     def __post_init__(self):

@@ -16,10 +16,11 @@ from llm_katan.server import ServerMetrics, create_app
 from llm_katan.stats import PersistentStats
 
 
-def make_app(providers):
+def make_app(providers, **config_overrides):
     config = ServerConfig(
         model_name="test-model", served_model_name="test-model",
         port=8000, backend="echo", providers=providers,
+        **config_overrides,
     )
     app = create_app(config)
     backend = EchoBackend(config)
@@ -169,6 +170,18 @@ class TestOpenAIToolCalling:
         assert resp.json()["choices"][0]["message"]["content"] is not None
         assert resp.json()["choices"][0]["finish_reason"] == "stop"
 
+    async def test_model_echoed_back(self, client):
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o-2024-08-06",
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [WEATHER_TOOL_OPENAI],
+            },
+            headers={"Authorization": "Bearer test"},
+        )
+        assert resp.json()["model"] == "gpt-4o-2024-08-06"
+
     async def test_multiple_tools_picks_first(self, client):
         second_tool = {
             "type": "function",
@@ -246,6 +259,183 @@ class TestAnthropicToolCalling:
         )
         assert resp.json()["stop_reason"] == "end_turn"
         assert resp.json()["content"][0]["type"] == "text"
+
+    async def test_model_echoed_back(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-sonnet-4-6-20250514", "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        assert resp.json()["model"] == "claude-sonnet-4-6-20250514"
+
+
+class TestAnthropicStreamingToolCalling:
+    @pytest_asyncio.fixture
+    async def client(self):
+        app = make_app(["anthropic"])
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+    @staticmethod
+    def _parse_sse(text):
+        events = []
+        current_event = None
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("event: "):
+                current_event = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                data = json.loads(line.removeprefix("data: "))
+                events.append((current_event, data))
+                current_event = None
+        return events
+
+    async def test_stream_tool_use_content_type(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100, "stream": True,
+                "messages": [{"role": "user", "content": "weather in SF?"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        assert "text/event-stream" in resp.headers["content-type"]
+
+    async def test_stream_tool_use_event_sequence(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100, "stream": True,
+                "messages": [{"role": "user", "content": "weather in SF?"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        events = self._parse_sse(resp.text)
+        types = [e[0] for e in events]
+
+        assert types[0] == "message_start"
+        assert "content_block_start" in types
+        assert "content_block_stop" in types
+        assert types[-2] == "message_delta"
+        assert types[-1] == "message_stop"
+
+        msg_delta = events[-2][1]
+        assert msg_delta["delta"]["stop_reason"] == "tool_use"
+
+    async def test_stream_tool_use_block_fields(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100, "stream": True,
+                "messages": [{"role": "user", "content": "weather in SF?"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        events = self._parse_sse(resp.text)
+
+        tool_starts = [
+            e[1] for e in events
+            if e[0] == "content_block_start"
+            and e[1].get("content_block", {}).get("type") == "tool_use"
+        ]
+        assert len(tool_starts) == 1
+        block = tool_starts[0]["content_block"]
+        assert block["id"].startswith("toolu_")
+        assert block["name"] == "get_weather"
+        assert block["input"] == {}
+
+    async def test_stream_tool_use_reassembly(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100, "stream": True,
+                "messages": [{"role": "user", "content": "weather in SF?"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        events = self._parse_sse(resp.text)
+
+        json_deltas = [
+            e[1]["delta"]["partial_json"]
+            for e in events
+            if e[0] == "content_block_delta"
+            and e[1].get("delta", {}).get("type") == "input_json_delta"
+        ]
+        assert len(json_deltas) > 0
+        assembled = json.loads("".join(json_deltas))
+        assert "location" in assembled
+
+    async def test_stream_tool_use_message_start_model(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-sonnet-4-6-20250514", "max_tokens": 100, "stream": True,
+                "messages": [{"role": "user", "content": "weather in SF?"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        events = self._parse_sse(resp.text)
+        msg_start = events[0][1]
+        assert msg_start["message"]["model"] == "claude-sonnet-4-6-20250514"
+
+
+class TestNoAutoToolProviders:
+    @pytest_asyncio.fixture
+    async def client(self):
+        app = make_app(["anthropic", "openai"], no_auto_tool_providers=["anthropic"])
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+    async def test_anthropic_tools_ignored_returns_text(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["stop_reason"] == "end_turn"
+        assert data["content"][0]["type"] == "text"
+
+    async def test_anthropic_stream_tools_ignored_returns_text(self, client):
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "test", "max_tokens": 100, "stream": True,
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [WEATHER_TOOL_ANTHROPIC],
+            },
+            headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
+        )
+        assert "text/event-stream" in resp.headers["content-type"]
+
+    async def test_openai_still_returns_tool_calls(self, client):
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test",
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [WEATHER_TOOL_OPENAI],
+            },
+            headers={"Authorization": "Bearer test"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["choices"][0]["finish_reason"] == "tool_calls"
+        assert data["choices"][0]["message"]["tool_calls"] is not None
 
 
 # ── Vertex AI ──

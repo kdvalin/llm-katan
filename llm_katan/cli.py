@@ -19,7 +19,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.16.0"
+    __version__ = "0.20.2"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -155,6 +155,11 @@ logger = logging.getLogger(__name__)
     help="Inter-Token Latency in ms. Delays between streaming chunks. Echo backend only. (default: 0)",
 )
 @click.option(
+    "--no-auto-tool-providers",
+    default="",
+    help="Comma-separated providers that skip auto tool_use responses (e.g., 'anthropic').",
+)
+@click.option(
     "--workers",
     default=1, type=int,
     help="Number of workers to spin up"
@@ -187,6 +192,7 @@ def main(
     chunk_delay_ms: int,
     ttft_ms: int,
     itl_ms: int,
+    no_auto_tool_providers: str,
     workers: int,
     disable_dashboard: bool
 ):
@@ -255,8 +261,9 @@ def main(
         chunk_delay_ms=chunk_delay_ms,
         ttft_ms=ttft_ms,
         itl_ms=itl_ms,
+        no_auto_tool_providers=[p.strip() for p in no_auto_tool_providers.split(",") if p.strip()],
         workers=workers,
-        enable_dashboard=not disable_dashboard
+        enable_dashboard=not disable_dashboard,
     )
 
     protocol = "https" if config.tls else "http"
