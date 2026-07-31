@@ -6,6 +6,8 @@ on:
       - "*"
   pull_request:
 
+permissions: write-all
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kdvalin/llm-katan
